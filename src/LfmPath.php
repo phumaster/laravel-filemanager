@@ -2,6 +2,7 @@
 
 namespace UniSharp\LaravelFilemanager;
 
+use Illuminate\Http\File;
 use Illuminate\Container\Container;
 use Intervention\Image\Facades\Image;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -117,10 +118,10 @@ class LfmPath
 
     public function pretty($item_path)
     {
-        $lfm_path = clone $this;
-        $lfm_path = $lfm_path->setName($this->helper->getNameFromPath($item_path));
-
-        return Container::getInstance()->makeWith(LfmItem::class, ['lfm' => $lfm_path, 'helper' => $this->helper]);
+        return Container::getInstance()->makeWith(LfmItem::class, [
+            'lfm' => (clone $this)->setName($this->helper->getNameFromPath($item_path)),
+            'helper' => $this->helper
+        ]);
     }
 
     public function delete()
@@ -152,18 +153,11 @@ class LfmPath
         $working_dir = $this->path('working_dir');
         $parent_dir = substr($working_dir, 0, strrpos($working_dir, '/'));
 
-        $parent_path = clone $this;
-        $parent_path->dir($parent_dir)->setName(null);
+        $parent_directories = array_map(function ($directory_path) {
+            return app(static::class)->translateToLfmPath($directory_path);
+        }, app(static::class)->dir($parent_dir)->directories());
 
-        $directories = $parent_path->directories();
-
-        $that = $this;
-
-        $directories = array_map(function ($directory_path) use ($that) {
-            return $this->translateToLfmPath($directory_path);
-        }, $directories);
-
-        return in_array($this->path('url'), $directories);
+        return in_array($this->path('url'), $parent_directories);
     }
 
     /**
@@ -299,7 +293,7 @@ class LfmPath
 
     private function saveFile($file, $new_file_name)
     {
-        $this->setName($new_file_name)->storage->save(file_get_contents($file));
+        $this->setName($new_file_name)->storage->save($file);
 
         $this->makeThumbnail($new_file_name);
 
@@ -318,10 +312,13 @@ class LfmPath
         $this->setName(null)->thumb(true)->createFolder();
 
         // generate cropped image content
-        $image_content = Image::make($original_image->get())
+        $image_path = $this->setName($file_name)->thumb(true)->path('absolute');
+        $image = Image::make($original_image->get())
             ->fit(config('lfm.thumb_img_width', 200), config('lfm.thumb_img_height', 200))
-            ->encode();
+            ->save($image_path);
 
-        $this->setName($file_name)->thumb(true)->storage->save((string) $image_content);
+        $file = new File($image_path);
+
+        $this->setName($file_name)->thumb(true)->storage->save($file);
     }
 }
